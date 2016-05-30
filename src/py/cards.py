@@ -7,12 +7,12 @@ G = 2
 R = 3
 B = 4
 
-def cost_dict_to_tuple(cost_dict):
-  w = cost_dict.get(W, 0)
-  u = cost_dict.get(U, 0)
-  g = cost_dict.get(G, 0)
-  r = cost_dict.get(R, 0)
-  b = cost_dict.get(B, 0)
+def color_dict_to_tuple(color_dict):
+  w = color_dict.get(W, 0)
+  u = color_dict.get(U, 0)
+  g = color_dict.get(G, 0)
+  r = color_dict.get(R, 0)
+  b = color_dict.get(B, 0)
   return (w, u, g, r, b)
 
 def color_to_str(color):
@@ -27,19 +27,19 @@ def color_tuple_to_str(t):
 
 class Card:
   __slots__ = ['dots', 'points', 'color', 'cost']
-  def __init__(self, dots, points, color, cost_dict):
+  def __init__(self, dots, points, color, color_dict):
     self.dots = dots
     self.points = points
     self.color = color
-    self.cost = cost_dict_to_tuple(cost_dict)
+    self.cost = color_dict_to_tuple(color_dict)
 
   def __str__(self):
     return '%s%s%s(%s)' % (self.dots, color_to_str(self.color), self.points, color_tuple_to_str(self.cost))
 
 ALL_CARDS = []
 
-def _add_card(dots, points, color, cost_dict):
-  ALL_CARDS.append(Card(dots, points, color, cost_dict))
+def _add_card(dots, points, color, color_dict):
+  ALL_CARDS.append(Card(dots, points, color, color_dict))
 
 _add_card(1, 0, W, {R:2, B:1})
 _add_card(1, 0, U, {W:1, B:2})
@@ -181,4 +181,30 @@ def _validate_cards():
     start += 5
 
 _validate_cards()
+
+class Noble:
+  __slots__ = ['points', 'requirement']
+  def __init__(self, points, requirement):
+    self.points = points
+    self.requirement = color_dict_to_tuple(requirement)
+
+  def __str__(self):
+    return '%s(%s)' % (self.points, color_tuple_to_str(self.requirement))
+
+ALL_NOBLES = []
+
+def _add_noble(points, color_dict):
+  ALL_NOBLES.append(Noble(points, color_dict))
+
+_add_noble(3, {G:3, U:3, W:3})
+_add_noble(3, {G:3, U:3, R:3})
+_add_noble(3, {B:3, R:3, W:3})
+_add_noble(3, {B:3, R:3, G:3})
+_add_noble(3, {B:3, U:3, W:3})
+
+_add_noble(3, {B:4, W:4})
+_add_noble(3, {U:4, W:4})
+_add_noble(3, {R:4, G:4})
+_add_noble(3, {B:4, R:4})
+_add_noble(3, {U:4, G:4})
 
