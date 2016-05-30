@@ -1,17 +1,29 @@
+import sys
+import traceback
 
-B = 1
-U = 2
-G = 3
-R = 4
-W = 5
+W = 0
+U = 1
+G = 2
+R = 3
+B = 4
 
 def cost_dict_to_tuple(cost_dict):
-  b = cost_dict.get(B, 0)
+  w = cost_dict.get(W, 0)
   u = cost_dict.get(U, 0)
   g = cost_dict.get(G, 0)
   r = cost_dict.get(R, 0)
-  w = cost_dict.get(W, 0)
-  return (b,u,g,r,w)
+  b = cost_dict.get(B, 0)
+  return (w, u, g, r, b)
+
+def color_to_str(color):
+  return 'WUGRB'[color]
+
+def color_tuple_to_str(t):
+  tokens = []
+  for (color,count) in enumerate(t):
+    if count:
+      tokens.append('%s%s' % (color_to_str(color), count))
+  return ','.join(tokens)
 
 class Card:
   __slots__ = ['dots', 'points', 'color', 'cost']
@@ -20,6 +32,9 @@ class Card:
     self.points = points
     self.color = color
     self.cost = cost_dict_to_tuple(cost_dict)
+
+  def __str__(self):
+    return '%s%s%s(%s)' % (self.dots, color_to_str(self.color), self.points, color_tuple_to_str(self.cost))
 
 ALL_CARDS = []
 
@@ -38,19 +53,19 @@ _add_card(1, 0, G, {R:3})
 _add_card(1, 0, R, {W:3})
 _add_card(1, 0, W, {U:3})
 
-_add_card(1, 0, B, {U:1, G:1, R:1, W:1})
-_add_card(1, 0, U, {B:1, G:1, R:1, W:1})
-_add_card(1, 0, G, {B:1, U:1, R:1, W:1})
-_add_card(1, 0, R, {B:1, U:1, R:1, W:1})
-_add_card(1, 0, W, {B:1, U:1, G:1, R:1})
+_add_card(1, 0, B, {W:1, U:1, G:1, R:1})
+_add_card(1, 0, U, {W:1, G:1, R:1, B:1})
+_add_card(1, 0, G, {W:1, U:1, R:1, B:1})
+_add_card(1, 0, R, {W:1, U:1, G:1, B:1})
+_add_card(1, 0, W, {U:1, G:1, R:1, B:1})
 
-_add_card(1, 0, B, {U:2, G:1, R:1, W:1})
-_add_card(1, 0, U, {B:1, G:1, R:2, W:1})
-_add_card(1, 0, G, {B:2, U:1, R:1, W:1})
-_add_card(1, 0, R, {B:1, U:1, R:1, W:2})
-_add_card(1, 0, W, {B:1, U:1, G:2, R:1})
+_add_card(1, 0, B, {W:1, U:2, G:1, R:1})
+_add_card(1, 0, U, {W:1, G:1, R:2, B:1})
+_add_card(1, 0, G, {W:1, U:1, R:1, B:2})
+_add_card(1, 0, R, {W:2, U:1, G:1, B:1})
+_add_card(1, 0, W, {U:1, G:2, R:1, B:1})
 
-_add_card(1, 0, B, {G:2, W:2})
+_add_card(1, 0, B, {W:2, G:2})
 _add_card(1, 0, U, {G:2, B:2})
 _add_card(1, 0, G, {U:2, R:2})
 _add_card(1, 0, R, {W:2, R:2})
@@ -70,7 +85,7 @@ _add_card(1, 0, W, {U:2, G:2, B:1})
 
 _add_card(1, 1, B, {U:4})
 _add_card(1, 1, U, {R:4})
-_add_card(1, 1, G, {G:4})
+_add_card(1, 1, G, {B:4})
 _add_card(1, 1, R, {W:4})
 _add_card(1, 1, W, {G:4})
 
@@ -133,4 +148,37 @@ _add_card(3, 4, U, {W:7})
 _add_card(3, 4, G, {U:7})
 _add_card(3, 4, R, {G:7})
 _add_card(3, 4, W, {B:7})
+
+def _validate_symmetry(block):
+  assert len(set([card.dots for card in block])) == 1
+  assert len(set([card.points for card in block])) == 1
+  assert set([card.color for card in block]) == set([B,U,G,R,W])
+  assert len(set([tuple(sorted(card.cost)) for card in block])) == 1
+
+  total_costs = [0,0,0,0,0] 
+  for card in block:
+    for (k,v) in enumerate(card.cost):
+      total_costs[k] += v
+
+  assert len(set(total_costs)) == 1
+
+def _validate_cards():
+  assert len(ALL_CARDS) % 5 == 0
+  start = 0
+  while True:
+    block = ALL_CARDS[start:start+5]
+    if not block: break
+    try:
+      _validate_symmetry(block)
+    except:
+      print 'Validation failed for:'
+      for card in block:
+        print str(card)
+
+      traceback.print_exc()
+      sys.exit(1)
+
+    start += 5
+
+_validate_cards()
 
