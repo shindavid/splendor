@@ -6,6 +6,7 @@ U = 1
 G = 2
 R = 3
 B = 4
+J = 5
 
 def color_dict_to_tuple(color_dict):
   w = color_dict.get(W, 0)
@@ -16,7 +17,7 @@ def color_dict_to_tuple(color_dict):
   return (w, u, g, r, b)
 
 def color_to_str(color):
-  return 'WUGRB'[color]
+  return 'WUGRBJ'[color]
 
 def color_tuple_to_str(t):
   tokens = []
@@ -28,7 +29,7 @@ def color_tuple_to_str(t):
 class Card:
   next_id = -1
   MASTER_LIST = []
-  __slots__ = ['ID', 'dots', 'points', 'color', 'cost']
+  __slots__ = ['ID', 'levels', 'points', 'color', 'cost']
 
   @staticmethod
   def get_next_id():
@@ -36,18 +37,24 @@ class Card:
     return Card.next_id
 
   @staticmethod
-  def _add_card(dots, points, color, color_dict):
-    Card.MASTER_LIST.append(Card(dots, points, color, color_dict))
+  def _add_card(levels, points, color, color_dict):
+    Card.MASTER_LIST.append(Card(levels, points, color, color_dict))
 
-  def __init__(self, dots, points, color, color_dict):
+  def __init__(self, levels, points, color, color_dict):
     self.ID = Card.get_next_id()
-    self.dots = dots
+    self.levels = levels
     self.points = points
     self.color = color
     self.cost = color_dict_to_tuple(color_dict)
 
+    # for convenience
+    self._color_tuple = tuple([(1 if color==i else 0) for i in range(5)])
+
+  def color_tuple(self):
+    return self._color_tuple
+
   def __str__(self):
-    return '%s:%s%s%s(%s)' % (self.ID, self.dots, color_to_str(self.color), self.points, color_tuple_to_str(self.cost))
+    return '%s:%s%s%s(%s)' % (self.ID, self.levels, color_to_str(self.color), self.points, color_tuple_to_str(self.cost))
 
 Card._add_card(1, 0, W, {R:2, B:1})
 Card._add_card(1, 0, U, {W:1, B:2})
@@ -158,7 +165,7 @@ Card._add_card(3, 4, R, {G:7})
 Card._add_card(3, 4, B, {R:7})
 
 def _validate_symmetry(block):
-  assert len(set([card.dots for card in block])) == 1
+  assert len(set([card.levels for card in block])) == 1
   assert len(set([card.points for card in block])) == 1
   assert set([card.color for card in block]) == set([B,U,G,R,W])
   assert len(set([tuple(sorted(card.cost)) for card in block])) == 1
