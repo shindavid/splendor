@@ -1,25 +1,42 @@
+import numpy as np
 import sys
 import traceback
 
-W = 0
-U = 1
-G = 2
-R = 3
-B = 4
-J = 5
+class COLORS:
+  W = 0
+  U = 1
+  G = 2
+  R = 3
+  B = 4
+  J = 5
 
-def color_dict_to_tuple(color_dict):
+W = COLORS.W
+U = COLORS.U
+G = COLORS.G
+R = COLORS.R
+B = COLORS.B
+J = COLORS.J
+
+NUM_LEVELS = 3
+NUM_COLORS = 5
+NUM_COLORS_INCLUDING_JOKER = NUM_COLORS + 1
+NUM_JOKERS = 5
+PER_PLAYER_COIN_LIMIT = 10
+NUM_COINS_TO_TAKE_PER_TURN = 3
+REQUIRED_STACK_SIZE_TO_TAKE_2_OF = 4
+
+def color_dict_to_np_array(color_dict):
   w = color_dict.get(W, 0)
   u = color_dict.get(U, 0)
   g = color_dict.get(G, 0)
   r = color_dict.get(R, 0)
   b = color_dict.get(B, 0)
-  return (w, u, g, r, b)
+  return np.array([w, u, g, r, b])
 
 def color_to_str(color):
   return 'WUGRBJ'[color]
 
-def color_tuple_to_str(t):
+def color_np_array_to_str(t):
   tokens = []
   for (color,count) in enumerate(t):
     if count:
@@ -45,16 +62,16 @@ class Card:
     self.levels = levels
     self.points = points
     self.color = color
-    self.cost = color_dict_to_tuple(color_dict)
+    self.cost = color_dict_to_np_array(color_dict)
 
     # for convenience
-    self._color_tuple = tuple([(1 if color==i else 0) for i in range(5)])
+    self._color_np_array = np.array([(1 if color==i else 0) for i in range(NUM_COLORS)])
 
-  def color_tuple(self):
-    return self._color_tuple
+  def color_np_array(self):
+    return self._color_np_array
 
   def __str__(self):
-    return '%s:%s%s%s(%s)' % (self.ID, self.levels, color_to_str(self.color), self.points, color_tuple_to_str(self.cost))
+    return '%s:%s%s%s(%s)' % (self.ID, self.levels, color_to_str(self.color), self.points, color_np_array_to_str(self.cost))
 
 Card._add_card(1, 0, W, {R:2, B:1})
 Card._add_card(1, 0, U, {W:1, B:2})
@@ -214,10 +231,10 @@ class Noble:
   def __init__(self, points, requirement):
     self.ID = Noble.get_next_id()
     self.points = points
-    self.requirement = color_dict_to_tuple(requirement)
+    self.requirement = color_dict_to_np_array(requirement)
 
   def __str__(self):
-    return '%s(%s)' % (self.points, color_tuple_to_str(self.requirement))
+    return '%s(%s)' % (self.points, color_np_array_to_str(self.requirement))
 
 Noble._add_noble(3, {G:3, U:3, W:3})
 Noble._add_noble(3, {G:3, U:3, R:3})

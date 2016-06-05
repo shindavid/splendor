@@ -1,10 +1,12 @@
 import random
 from cards import *
+import numpy as np
 
 class BoardState:
   def __init__(self):
     self.cards = [[], [], []]  # cards[i] consists of <=4 Card's whose levels==i+1
-    self.coins = [0 for i in range(6)]  # coins[color] is how many coins are left of that color
+    self.remaining_card_counts = np.array([0 for i in range(NUM_LEVELS)])
+    self.coins = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])  # coins[color] is how many coins are left of that color
     self.nobles = []  # <=3 Noble's
 
   def deal(self, card):
@@ -17,29 +19,63 @@ class PublicPlayerState:
   def __init__(self):
     self.purchased_cards = []
     self.awarded_nobles = []
-    self.coins = [0 for i in range(6)]
+    self.coins = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])
+    self.num_reserved_cards = 0
 
     # derived fields
-    self.discounts = [0 for i in range(5)]
+    self.discounts = np.array([0 for i in range(NUM_COLORS)])
     self.points = 0
 
   def validate(self):
     assert self.points == sum([card.points for card in self.purchased_cards]) + sum([noble.points for noble in self.awarded_nobles])
-    assert self.discounts == [sum(x) for x in zip(*[card.color_tuple() for card in self.purchased_cards])]
-    assert len(self.reserved_cards) <= 3
-    assert sum(self.coins) <= 10
+    assert self.discounts == np.sum(np.vstack([card.color_np_array() for card in self.purchased_cards]), axis=0)
+    assert self.num_reserved_cards <= 3
+    assert np.sum(self.coins) <= 10
 
 class PlayerState:
   def __init__(self):
     self.public_player_state = PublicPlayerState()
     self.reserved_cards = []
 
+class PlayerAction:
+  pass
+
+class TakeCoinsAction(PlayerAction):
+  def __init__(self):
+    self.taken = np.array([0 for i in range(NUM_COLORS)])
+    self.discarded = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])
+
+  def __str__(self):
+    tokens = ['+']
+    tokens.extend([color_to_str(c) * n for (c,n) in enumerate(self.taken)])
+    if np.any(self.discarded):
+      tokens = ['-']
+      tokens.extend([color_to_str(c) * n for (c,n) in enumerate(self.discarded)])
+    return ''.join(tokens)
+
+class ReserveCardAction(PlayerAction):
+  def __init__(self, levels, index, golds_taken):
+    # -1 means reserve from top of deck
+    self.levels = levels
+    self.index = index
+    self.golds_taken = golds_taken
+    self.discarded = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])
+
+class BuyPublicCardAction(PlayerAction):
+  def __init__(self, levels, index):
+    self.levels = levels
+    self.index = index
+
+class BuyReservedCardAction(PlayerAction):
+  def __init__(self, reserved_index):
+    self.reserved_index = reserved_index
+
 class GameState:
   num_coins_to_use = {2:4, 3:5, 4:7}
   num_nobles_to_use = {2:3, 3:4, 4:5}
 
   def __init__(self, seed, players):
-    num_players = len(players)
+    self.num_players = len(players)
 
     random.seed(seed)
     shuffled_cards = [card for card in Card.MASTER_LIST]
@@ -54,26 +90,109 @@ class GameState:
     self.card_indices = [0, 0, 0]  # card_indices[i] represents next card to be dealt with levels==i+1
     for card in shuffled_cards:
       self.all_cards[card.levels-1].append(card)
-    
+      self.board_state.remaining_card_counts[card.levels-1] += 1
+
     for levels in (1,2,3):
       for i in range(4):
         self.deal_card(levels)
 
-    for color in range(5):
-      self.board_state.coins[color] = GameState.num_coins_to_use[num_players]
-    self.board_state.coins[J] = 5
+    for color in range(NUM_COLORS):
+      self.board_state.coins[color] = GameState.num_coins_to_use[self.num_players]
+    self.board_state.coins[COLORS.J] = NUM_JOKERS
 
-    self.board_state.nobles.extend(shuffled_nobles[:GameState.num_nobles_to_use[num_players]])
+    self.board_state.nobles.extend(shuffled_nobles[:GameState.num_nobles_to_use[self.num_players]])
 
-    self.players = players
-    self.player_states = [PlayerState() for p in players]
+    self.players = shuffled_players
+    self.player_states = [PlayerState() for p in shuffled_players]
     self.current_player_index = 0
 
   def deal_card(self, levels):
     L = levels-1
     N = self.card_indices[L]
-    if N >= len(self.all_cards[L]): return
+    assert N < len(self.all_cards[L])
 
+    self.board_state.remaining_card_counts[L] -= 1
     self.board_state.cards[L].append(self.all_cards[L][N])
     self.card_indices[L] += 1
+
+  def get_public_player_states(self):
+    return [state.public_player_state for state in self.player_states]
+
+  def do_turn(self, player_index):
+    action = self.players[player_index].get_action(self.board_state, self.get_public_player_states())
+    self.validate_action(action, player_index)
+    self.handle_action(action, player_index)
+
+  def validate_action(self, action, player_index):
+    player_state = self.player_states[player_index]
+    public_player_state = player_state.public_player_state
+    if isinstance(action, TakeCoinsAction):
+      assert action.taken >= 0
+      assert action.discarded >= 0
+      assert self.board_state.coins >= action.taken
+      assert action.discarded <= public_player_state.coins + action.taken
+
+      num_taken = np.sum(action.taken)
+      assert np.sum(action.discarded) == max(0, np.sum(public_player_state.coins) + num_taken - PER_PLAYER_COIN_LIMIT)
+      if num_taken == 1:
+        # only 1 coin taken, only allowed if board only had 1 stack available. And we'll say that the
+        # player has to taken 2-of if possible
+        assert len(np.any(self.board_state.coins)) == 1
+        assert np.max(self.board_state.coins) < REQUIRED_STACK_SIZE_TO_TAKE_2_OF
+      elif num_taken == 2:
+        if 2 in action.taken:
+          assert self.board_state.coins[np.argmax(action.taken)] >= REQUIRED_STACK_SIZE_TO_TAKE_2_OF
+        else:
+          # took 2 distinct, not allowed if board had 3 different stacks available
+          assert len(np.any(self.board_state.coins)) == 2
+      elif num_taken == 3:
+        pass
+      else:
+        raise Exception('Invalid action by player %s: %s' % (self.get_player_name(player_index), str(action)))
+    elif isinstance(action, ReserveCardAction):
+      assert action.golds_taken in (0,1)
+      if action.golds_taken:
+        assert self.board_state.coins[COLORS.J]
+        if np.sum(public_player_state.coins) == PER_PLAYER_COIN_LIMIT:
+          assert np.sum(action.discarded) == 1
+          assert public_player_state.coins[np.argmax(action.discarded)] > 0
+        else:
+          assert np.sum(action.discarded) == 0
+      else:
+        assert not self.board_state.coins[COLORS.J]
+
+      if action.index == -1:
+        assert self.board_state.remaining_card_counts[action.levels-1] > 0
+      else:
+        assert len(self.board_state.cards[action.levels-1]) > action.index
+        # NOTE(dshin) The iOS app doesn't allow you to reserve cards that you can buy. I think that
+        # is simply to provide a nicer interface. The rules technically allow this, so I will too.
+    elif isinstance(action, BuyPublicCardAction):
+      card = self.board_state.cards[action.levels-1][action.index]
+      self.validate_card_purchase(public_player_state, card)
+    elif isinstance(action, BuyReservedCardAction):
+      card = player_state.reserved_cards[action.reserved_index]
+      self.validate_card_purchase(public_player_state, card)
+    else:
+      raise Exception('Unknown action type "%s"' % type(action))
+
+  def validate_card_purchase(self, public_player_state, card):
+    slack = public.player_state.coins[:NUM_COLORS] - card.cost
+    shortfall = -np.sum(np.min(0, slack))
+    assert shortfall <= public_player_state.coins[COLORS.J]
+
+  def handle_action(self, action, player_index):
+    pass
+
+  def get_player_name(self, player_index):
+    return self.players[player_index].get_name()
+
+class GameManager:
+  def __init__(self, seed, players):
+    self.game_state = GameState(seed, players)
+
+  def start(self):
+    while self.game_state.get_max_score() < 15:
+      for player_index in range(self.game_state.num_players):
+        self.game_state.do_turn(player_index)
 
