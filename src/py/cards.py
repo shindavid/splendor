@@ -24,6 +24,7 @@ NUM_JOKERS = 5
 PER_PLAYER_COIN_LIMIT = 10
 NUM_COINS_TO_TAKE_PER_TURN = 3
 REQUIRED_STACK_SIZE_TO_TAKE_2_OF = 4
+RESERVED_CARD_LIMIT = 3
 
 def color_dict_to_np_array(color_dict):
   w = color_dict.get(W, 0)
