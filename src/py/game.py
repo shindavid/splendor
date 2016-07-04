@@ -4,7 +4,8 @@ import numpy as np
 
 class BoardState:
   def __init__(self):
-    self.cards = [[], [], []]  # cards[i] consists of <=4 Card's whose levels==i+1
+    self.round_number = 0
+    self.cards = [[] for i in range(NUM_LEVELS)]  # cards[i] consists of <=4 Card's whose levels==i+1
     self.remaining_card_counts = np.array([0 for i in range(NUM_LEVELS)])
     self.coins = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])  # coins[color] is how many coins are left of that color
     self.nobles = []  # <=3 Noble's
@@ -14,6 +15,28 @@ class BoardState:
 
   def remove(self, card):
     self.cards[card.levels-1].remove(card)
+
+  def generate_legal_take_coin_actions(self):
+    actions = []
+    for C1 in range(NUM_COLORS):
+      if not self.coins[C1]: continue
+      if self.coins[C1] >= REQUIRED_STACK_SIZE_TO_TAKE_2_OF:
+        take = TakeCoinsAction()
+        take.coins[C1] = 2
+        actions.append(take)
+      
+      for C2 in range(C1):
+        if not self.coins[C2]: continue
+        for C3 in range(C2):
+          if not self.coins[C3]: continue
+          
+          take = TakeCoinsAction()
+          take.coins[C1] = 1
+          take.coins[C2] = 1
+          take.coins[C3] = 1
+          actions.append(take)
+
+    return actions
 
 class PublicPlayerState:
   def __init__(self):
@@ -63,7 +86,8 @@ class ReserveCardAction(PlayerAction):
   def __init__(self, levels, index):
     self.levels = levels
     self.index = index  # -1 means reserve from top of deck
-  
+    self.card = None  # will be set by GameManager
+
   def __str__(self):
     return 'reserve'
 
@@ -82,6 +106,7 @@ class BuyReservedCardAction(PlayerAction):
   def __init__(self, reserved_index):
     self.reserved_index = reserved_index
     self.coins = np.array([0 for i in range(NUM_COLORS_INCLUDING_JOKER)])
+    self.card = None  # will be set by GameManager
 
   def __str__(self):
     return 'reserve unk'
@@ -113,12 +138,13 @@ class GameState:
     self.num_players = len(players)
 
     random.seed(seed)
+
     shuffled_cards = [card for card in Card.MASTER_LIST]
     shuffled_nobles = [noble for noble in Noble.MASTER_LIST]
     shuffled_players = [p for in players]
     random.shuffle(shuffled_cards)
     random.shuffle(shuffled_nobles)
-    random.shuffle(players)
+    random.shuffle(shuffled_players)
     
     self.board_state = BoardState()
     self.all_cards = [[], [], []]  # all_cards[i] consists of all Card ID's whose levels==i+1
@@ -129,7 +155,7 @@ class GameState:
 
     for levels in (1,2,3):
       L = levels-1
-      for i in range(4):
+      for i in range(NUM_CARDS_PER_LEVEL):
         card = self.deal_card(levels)
         self.board_state.cards[L].append(card)
 
@@ -156,7 +182,7 @@ class GameState:
     return [state.public_player_state for state in self.player_states]
 
   def do_turn(self, player_index):
-    action = self.players[player_index].get_action(self.board_state, self.get_public_player_states())
+    action = self.players[player_index].get_action()
     self.validate_action(action, player_index)
     self.handle_action(action, player_index):
     self.replenish_board_cards()
@@ -169,7 +195,7 @@ class GameState:
     candidates = [i for (i,x) in enumerate(self.nobles) if public_player_state.discounts >= x.requirement]
     if not candidates: return
 
-    action = self.players[player_index].get_noble_claim(self.board_state, self.get_public_player_states(), candidates)
+    action = self.players[player_index].get_noble_claim(candidates)
 
     claimed_noble = candidates[action.noble_index]
     public_player_state.add_claimed_noble(claimed_noble)
@@ -182,17 +208,26 @@ class GameState:
     
     num_coins_to_discard = PER_PLAYER_COIN_LIMIT - num_coins
 
-    action = self.players[player_index].get_discard(self.board_state, self.get_public_player_states())
+    action = self.players[player_index].get_discard()
     assert action.coins >= 0
     assert sum(action.coins) == num_coins_to_discard
     public_player_state.coins -= action.coins
+
+    for (index, player) in enumerate(self.players):
+      player.handle_dicard_action_broadcast(action, player_index)
 
   def replenish_board_cards(self):
     for (L,subcards) in enumerate(self.board_state.cards):
       for (i,card) in enumerate(subcards):
         if card is None:
           subcards[i] = self.deal_card(L+1)
+          self.broadcast_card_deal(subcards[i])
+
       self.board_state.cards[L] = [card for in subcards if card is not None]
+
+  def broadcast_card_deal(self, card):
+    for player in self.players:
+      player.handle_card_deal_broadcast(card)
 
   def validate_action(self, action, player_index):
     player_state = self.player_states[player_index]
@@ -245,6 +280,8 @@ class GameState:
     public_player_state = player_state.public_player_state
     if isinstance(action, TakeCoinsAction):
       public_player_state.coins[:NUM_COLORS] += action.coins
+      for (index, player) in enumerate(self.players):
+        player.handle_take_coins_action_broadcast(action, player_index)
     elif isinstance(action, ReserveCardAction):
       if self.board_state.coins[COLORS.J] > 0:
         public_player_state.coins[COLORS.J] += 1
@@ -252,23 +289,32 @@ class GameState:
       
       if action.index == -1:
         card = self.deal_card(action.levels)
+        action.card = None
       else:
         card = self.board_state.cards[action.levels-1][action.index]
         self.board_state.cards[action.levels-1][action.index] = None
+        action.card = card
       
       player_state.reserved_cards.append(card)
+      for (index, player) in enumerate(self.players):
+        player.handle_reserve_card_action_broadcast(action, player_index)
     elif isinstance(action, BuyPublicCardAction):
       public_player_state.coins -= action.coins
       self.board_state.coins += action.coins
       card = self.board_state.cards[action.levels-1][action.index]
       public_player_state.add_purchased_card(card)
       self.board_state.cards[action.levels-1][action.index] = None
+      for (index, player) in enumerate(self.players):
+        player.handle_buy_public_card_action_broadcast(action, player_index)
     elif isinstance(action, BuyReservedCardAction):
       public_player_state.coins -= action.coins
       self.board_state.coins += action.coins
       card = player_state.reserved_cards[action.reserved_index]
+      action.card = card
       public_player_state.add_purchased_card(card)
       del player_state.reserved_cards[action.reserved_index]
+      for (index, player) in enumerate(self.players):
+        player.handle_buy_reserved_card_action_broadcast(action, player_index)
 
   def get_player_name(self, player_index):
     return self.players[player_index].get_name()
@@ -286,11 +332,16 @@ class GameState:
 class GameManager:
   def __init__(self, seed, players):
     self.game_state = GameState(seed, players)
+    for (index, player) in enumerate(self.game_state.players):
+      player.init(index, self.game_state.player_states[index], self.board_state,
+          [player_state.public_player_state for player_state in self.game_state.player_states])
 
   def start(self):
-    while self.game_state.get_max_score() < 15:
+    while self.game_state.get_max_score() < GAME_ENDING_SCORE:
       for player_index in range(self.game_state.num_players):
         self.game_state.do_turn(player_index)
+      self.game_state.board_state.round_number += 1
+
     winners = self.get_winners()
     print 'Winner: %s' % (','.join([p.get_name() for p in winners]))
 
